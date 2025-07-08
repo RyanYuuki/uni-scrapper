@@ -27,8 +27,7 @@
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/uniscrapper.git
-cd uniscrapper
+npm install uni_scrapper
 ````
 
 ### Install Dependencies

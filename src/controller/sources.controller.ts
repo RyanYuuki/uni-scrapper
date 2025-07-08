@@ -1,23 +1,23 @@
-import {
-  axios,
-  cacheManager,
-  ResponseHandler,
-  SearchResult,
-  Xprime,
-} from "../index";
+import SourceHandler from "../handler/sources.handler";
+import { cacheManager, ResponseHandler, Source } from "../index";
 
 class StreamController {
-  static async getSearch(req: any, res: any) {
+  private sourceHandler: SourceHandler;
+
+  constructor() {
+    this.sourceHandler = new SourceHandler();
+  }
+
+  async getSearch(req: any, res: any) {
     try {
-      const { query } = req.body;
+      const { query, source = Source.XPRIME } = req.body;
 
       if (!query) {
         return ResponseHandler.badRequest(res, "query is required");
       }
 
-      const cleanedQuery = query.replace(/\bseasons?\b/gi, "").trim();
-
-      let hitCached = cacheManager.get("search", cleanedQuery);
+      const cacheKey = `${source}_${query}`;
+      let hitCached = cacheManager.get("search", cacheKey);
 
       if (hitCached) {
         return ResponseHandler.success(
@@ -27,50 +27,17 @@ class StreamController {
         );
       }
 
-      const movieUrl = `https://tmdb.hexa.watch/api/tmdb/search/movie?query=${encodeURIComponent(cleanedQuery)}&page=1&include_adult=false`;
-      const tvUrl = `https://tmdb.hexa.watch/api/tmdb/search/tv?query=${encodeURIComponent(cleanedQuery)}&page=1&include_adult=false`;
+      const results = await this.sourceHandler.search(query);
 
-      const [movieRes, tvRes] = await Promise.all([
-        axios.get(movieUrl),
-        axios.get(tvUrl),
-      ]);
-
-      if (movieRes.status !== 200) {
-        throw new Error(`Failed to load movie data: ${movieRes.status}`);
-      }
-      if (tvRes.status !== 200) {
-        throw new Error(`Failed to load TV data: ${tvRes.status}`);
+      if (results.length === 0) {
+        return ResponseHandler.error(res, "No results found", 404);
       }
 
-      const movies: SearchResult[] = (movieRes.data.results || []).map(
-        (e: any) => ({
-          id: `https://tmdb.hexa.watch/api/tmdb/movie/${e.id}`,
-          title: e.title || e.name,
-          poster: `https://image.tmdb.org/t/p/w500${e.poster_path || e.backdrop_path || ""}`,
-        })
-      );
-
-      const series: SearchResult[] = (tvRes.data.results || []).map(
-        (e: any) => ({
-          id: `https://tmdb.hexa.watch/api/tmdb/tv/${e.id}`,
-          title: e.title || e.name,
-          poster: `https://image.tmdb.org/t/p/w500${e.poster_path || e.backdrop_path || ""}`,
-        })
-      );
-
-      const mixedResults: SearchResult[] = [];
-      const maxLength = Math.max(movies.length, series.length);
-
-      for (let i = 0; i < maxLength; i++) {
-        if (i < series.length) mixedResults.push(series[i]);
-        if (i < movies.length) mixedResults.push(movies[i]);
-      }
-
-      cacheManager.set("search", cleanedQuery, mixedResults);
+      cacheManager.set("search", cacheKey, results);
 
       return ResponseHandler.success(
         res,
-        mixedResults,
+        results,
         "Search results retrieved successfully"
       );
     } catch (error) {
@@ -84,15 +51,16 @@ class StreamController {
     }
   }
 
-  static async getDetails(req, res) {
+  async getDetails(req: any, res: any) {
     try {
-      const { id } = req.body;
+      const { id, source = Source.XPRIME } = req.body;
 
       if (!id) {
         return ResponseHandler.badRequest(res, "id is required");
       }
 
-      let hitCached = cacheManager.get("details", id);
+      const cacheKey = `${source}_${id}`;
+      let hitCached = cacheManager.get("details", cacheKey);
 
       if (hitCached) {
         return ResponseHandler.success(
@@ -102,108 +70,9 @@ class StreamController {
         );
       }
 
-      const origin = new URL(id).origin;
+      const result = await this.sourceHandler.getDetails(id, source);
 
-      const data = (
-        await axios.get(id, {
-          headers: {
-            Referer: origin + "/",
-            origin,
-          },
-        })
-      ).data;
-
-      if (!data) {
-        return ResponseHandler.error(res, "Error getting details", 500);
-      }
-
-      const isMovie = id.includes("movie");
-
-      const name = data.name || data.title;
-      const seasons = [];
-      let content = null;
-
-      const idMatch = id.match(/(?:movie|tv)\/(\d+)/);
-      const tmdbId = idMatch?.[1];
-      const imdbId = data.imdb_id;
-
-      if (!tmdbId) throw new Error("Invalid TMDB ID in URL");
-
-      if (isMovie) {
-        const releaseDate = data.release_date || "";
-        const year = releaseDate ? releaseDate.split("-")[0] : "";
-        content = {
-          title: "Movie",
-          id: JSON.stringify({
-            name,
-            imdbId,
-            tmdbId,
-            year,
-            type: "movie",
-          }),
-        };
-      } else {
-        const seasonList = data.seasons || [];
-
-        for (const season of seasonList) {
-          if (season.season_number === 0) continue;
-
-          const currentSeason = {
-            title: `Season ${season.season_number}`,
-            poster: `https://image.tmdb.org/t/p/w500${season.poster_path || season.backdrop_path || ""}`,
-            episodes: [],
-          };
-
-          const episodeCount = season.episode_count || 0;
-          const airDate = season.air_date || "";
-          const year = airDate ? airDate.split("-")[0] : "";
-
-          for (let ep = 1; ep <= episodeCount; ep++) {
-            currentSeason.episodes.push({
-              title: `Episode ${ep}`,
-              id: JSON.stringify({
-                name,
-                year,
-                tmdbId,
-                imdbId,
-                season: season.season_number,
-                episode: ep,
-                type: "tv",
-              }),
-            });
-          }
-
-          seasons.push(currentSeason);
-        }
-      }
-
-      let result = {};
-
-      if (isMovie) {
-        result = {
-          id: id,
-          title: name,
-          poster: `https://image.tmdb.org/t/p/w500${data.poster_path}`,
-          seasons: [
-            {
-              title: "Movie",
-              poster: "",
-              episodes: [content],
-              type: "movie",
-            },
-          ],
-        };
-      }
-
-      result = {
-        id: id,
-        title: name,
-        poster: `https://image.tmdb.org/t/p/w500${data.poster_path}`,
-        seasons: seasons,
-        type: isMovie ? "movie" : "tv",
-      };
-
-      cacheManager.set("details", id, result);
+      cacheManager.set("details", cacheKey, result);
 
       return ResponseHandler.success(
         res,
@@ -211,19 +80,21 @@ class StreamController {
         "Details data retrieved successfully"
       );
     } catch (error) {
+      console.log("Details error:", error);
       return ResponseHandler.error(res, "Error getting details", 500, error);
     }
   }
 
-  static async getStream(req, res) {
+  async getStream(req: any, res: any) {
     try {
-      const { id } = req.body;
+      const { id, source = Source.XPRIME } = req.body;
 
       if (!id) {
         return ResponseHandler.badRequest(res, "id is required");
       }
 
-      let hitCached = cacheManager.get("stream", id);
+      const cacheKey = `${source}_${id}`;
+      let hitCached = cacheManager.get("stream", cacheKey);
 
       if (hitCached) {
         return ResponseHandler.success(
@@ -233,13 +104,13 @@ class StreamController {
         );
       }
 
-      const data = await new Xprime().getStreams(JSON.stringify(req.body));
+      const data = await this.sourceHandler.getStreams(id, source);
 
-      if (!data) {
-        return ResponseHandler.error(res, "Error getting stream", 500);
+      if ((!data || data.length === 0) && data[0].url) {
+        return ResponseHandler.error(res, "No streams found", 404);
       }
 
-      cacheManager.set("stream", id, data);
+      cacheManager.set("stream", cacheKey, data);
 
       return ResponseHandler.success(
         res,
@@ -249,7 +120,8 @@ class StreamController {
     } catch (error) {
       console.error("Error in getStream:", {
         message: error.message,
-        url: req.body?.url,
+        id: req.body?.id,
+        source: req.body?.source,
         timestamp: new Date().toISOString(),
       });
 
@@ -276,5 +148,21 @@ class StreamController {
       return ResponseHandler.error(res, "Error getting stream", 500, error);
     }
   }
+
+  static async getSearch(req: any, res: any) {
+    const controller = new StreamController();
+    return controller.getSearch(req, res);
+  }
+
+  static async getDetails(req: any, res: any) {
+    const controller = new StreamController();
+    return controller.getDetails(req, res);
+  }
+
+  static async getStream(req: any, res: any) {
+    const controller = new StreamController();
+    return controller.getStream(req, res);
+  }
 }
+
 export default StreamController;

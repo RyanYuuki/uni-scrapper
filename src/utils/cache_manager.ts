@@ -3,7 +3,7 @@ import NodeCache from "node-cache";
 export class CacheManager {
   private cache: NodeCache;
 
-  constructor(ttlSeconds: number = 60 * 60 * 10) {
+  constructor(ttlSeconds: number = 60 * 60 * 24 * 10) {
     this.cache = new NodeCache({ stdTTL: ttlSeconds });
   }
 

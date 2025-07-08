@@ -1,10 +1,8 @@
-import { Media, Stream } from '../index';
+import { Media, Stream } from "../index";
 
-abstract class BaseSource {
+export abstract class BaseSource {
   abstract baseUrl: string;
   abstract headers: {};
   abstract getDetails(slug: string): Promise<Media>;
   abstract getStreams(slug: string): Promise<Stream[]>;
 }
-
-export default BaseSource;

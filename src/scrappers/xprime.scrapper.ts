@@ -1,4 +1,5 @@
-import { axios, Stream, BaseSource, Subtitle, Media } from "../index";
+import axios from "axios";
+import { Stream, BaseSource, Subtitle, Media } from "../index";
 
 export class Xprime extends BaseSource {
   baseUrl = "https://xprime.tv";
@@ -30,7 +31,12 @@ export class Xprime extends BaseSource {
         const year = releaseDate ? releaseDate.split("-")[0] : "";
         content = {
           title: "Movie",
-          id: `movie/${name}/${year}/${tmdbId}/${imdbId}`,
+          id: JSON.stringify({
+            id: tmdbId,
+            imdbId,
+            year,
+            name,
+          }),
         };
       } else {
         const seasonList = parsedData.seasons || [];
@@ -51,7 +57,14 @@ export class Xprime extends BaseSource {
           for (let ep = 1; ep <= episodeCount; ep++) {
             currentSeason.episodes.push({
               title: `Episode ${ep}`,
-              id: `tv/${name}/${year}/${tmdbId}/${imdbId}/${season.season_number}/${ep}`,
+              id: JSON.stringify({
+                id: tmdbId,
+                imdbId,
+                season: season.season_number,
+                name,
+                episode: episodeCount,
+                year,
+              }),
             });
           }
 
@@ -126,7 +139,6 @@ export class Xprime extends BaseSource {
 
       const streams: Stream[] = [];
 
-      // Combine results from all successful requests
       for (const result of futures) {
         if (result.status === "fulfilled" && result.value) {
           streams.push(...result.value);
