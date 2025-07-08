@@ -1,11 +1,10 @@
-import SourceHandler from "../handler/sources.handler";
-import { cacheManager, ResponseHandler, Source } from "../index";
+import { cacheManager, ResponseHandler, Source, UniScrapper } from "../index";
 
 class StreamController {
-  private sourceHandler: SourceHandler;
+  private sourceHandler: UniScrapper;
 
   constructor() {
-    this.sourceHandler = new SourceHandler();
+    this.sourceHandler = new UniScrapper();
   }
 
   async getSearch(req: any, res: any) {
